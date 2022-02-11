@@ -1,0 +1,24 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test
+  namespace: default
+  labels:
+    test: test
+spec:
+  rules:
+    - host: e2e-test.acm-sync-manager.kubestack.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: service1
+                port:
+                  number: 80
+  tls:
+    - hosts:
+      - e2e-test.acm-sync-manager.kubestack.io
+      secretName: e2e-test-tls

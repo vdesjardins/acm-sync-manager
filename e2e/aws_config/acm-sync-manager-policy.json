@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "acmmanager",
+      "Action": [
+        "acm:DescribeCertificate",
+        "acm:GetCertificate",
+        "acm:ListTagsForCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:RemoveTagsFromCertificate",
+        "acm:DeleteCertificate",
+        "acm:ImportCertificate"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:acm:*:$AWS_ACCOUNT:certificate/*"
+      ]
+    },
+    {
+      "Sid": "acmmanagerAllResources",
+      "Action": [
+        "acm:ListCertificates",
+        "acm:ImportCertificate"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "*"
+      ]
+    }
+  ]
+}

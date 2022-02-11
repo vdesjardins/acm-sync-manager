@@ -1,0 +1,4 @@
+- cleanup job to remove old certificates
+- e2e testing
+- add event for certificate imported in ACM
+- add count metric for certificate imported in ACM

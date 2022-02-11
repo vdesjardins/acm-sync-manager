@@ -1,0 +1,31 @@
+#![warn(rust_2018_idioms)]
+#![allow(unused_imports)]
+#![allow(clippy::blacklisted_name)]
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Kube Api Error: {0}")]
+    KubeError(#[source] kube::Error),
+
+    #[error("SerializationError: {0}")]
+    SerializationError(#[source] serde_json::Error),
+
+    #[error("ACMError: {0}")]
+    SdkError(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("NotOwnerError")]
+    NotOwnerError,
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// State machinery for kube
+pub mod manager;
+pub use manager::Manager;
+
+/// Log and trace integrations
+pub mod telemetry;
+
+/// aws acm
+pub mod acm;
