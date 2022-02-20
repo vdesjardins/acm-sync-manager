@@ -64,8 +64,8 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
 
     let client = ctx.get_ref().client.clone();
     ctx.get_ref().state.write().await.last_event = Utc::now();
-    // let reporter = ctx.get_ref().state.read().await.reporter.clone();
-    // let recorder = Recorder::new(client.clone(), reporter, secret.object_ref(&()));
+    let reporter = ctx.get_ref().state.read().await.reporter.clone();
+    let recorder = Recorder::new(client.clone(), reporter, ingress.object_ref(&()));
     let name = ingress.name();
     let ns = ingress.namespace().expect("ingress is namespaced");
     let arn = ingress
@@ -112,7 +112,22 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                         requeue_after: None,
                     })
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    recorder
+                        .publish(Event {
+                            action: "Import".into(),
+                            reason: "ImportError".into(),
+                            note: Some(format!(
+                                "Unable to import certificate for ingress {}",
+                                &err
+                            )),
+                            type_: EventType::Warning,
+                            secondary: None,
+                        })
+                        .await
+                        .map_err(Error::KubeError)?;
+                    return Err(err);
+                }
                 Ok(cert) => {
                     // update LB ARN annotation on ingress resource
                     let ingresses: Api<Ingress> = Api::namespaced(client.clone(), &ns);
@@ -124,7 +139,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                             "name": ingress.name(),
                             "namespace": ingress.namespace(),
                             "annotations": {
-                                ALB_ARN_ANNOTATION: cert.arn.unwrap()
+                                ALB_ARN_ANNOTATION: cert.arn.as_ref()
                             }
                         }
                     });
@@ -132,6 +147,19 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                     let patch = Patch::Apply(&patch);
                     ingresses
                         .patch(&ingress.name(), &params, &patch)
+                        .await
+                        .map_err(Error::KubeError)?;
+                    recorder
+                        .publish(Event {
+                            action: "Import".into(),
+                            reason: "Imported".into(),
+                            note: Some(format!(
+                                "Certificate {} imported successfully",
+                                &cert.arn.unwrap()
+                            )),
+                            type_: EventType::Normal,
+                            secondary: None,
+                        })
                         .await
                         .map_err(Error::KubeError)?;
                 }
@@ -148,7 +176,6 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
         .observe(duration);
     //.observe_with_exemplar(duration, ex);
     ctx.get_ref().metrics.handled_events.inc();
-    // info!("Reconciled Secret \"{}\" in {}", name, ns);
 
     // If no events were received, check back every 30 minutes
     Ok(ReconcilerAction {
