@@ -1,4 +1,6 @@
 - cleanup job to remove old certificates
+  - when is it relevant?
 - e2e testing
-- add event for certificate imported in ACM
+- github actions testing
+- create gh-pages for helm chart
 - add count metric for certificate imported in ACM
