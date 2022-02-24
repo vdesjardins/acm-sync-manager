@@ -52,6 +52,9 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: RUST_BACKTRACE
+              value: "1"
         - name: kube-rbac-proxy
           image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
           args:
