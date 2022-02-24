@@ -101,6 +101,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
             let mut ct = acm::Certificate::default();
             ct.name(&name)
                 .namespace(&ns)
+                .ingress_name(&name)
                 .set_arn(arn.clone())
                 .set_key(data.get("tls.key").and_then(|d| Some(d.0.clone())))
                 .set_cert(data.get("tls.crt").and_then(|d| Some(d.0.clone())))
@@ -133,7 +134,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                     let ingresses: Api<Ingress> = Api::namespaced(client.clone(), &ns);
                     let ingress = ingress.clone();
                     let patch = serde_json::json!({
-                        "apiVersion": "apps/v1",
+                        "apiVersion": "networking.k8s.io/v1",
                         "kind": "Ingress",
                         "metadata": {
                             "name": ingress.name(),

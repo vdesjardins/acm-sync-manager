@@ -193,13 +193,14 @@ impl CertificateService {
                 }
             }
         } else {
+            // TODO: should we try to scan all certificates in ACM for a match (tags and content)
             return Ok(None);
         };
 
         // check if the certificate found is own by us.
-        // if it is, fine we return it for updating if neccessary.
-        // if not we need a way to notify the caller that we cannot synchronize
-        // it. NotOwnerError is returned in that case.
+        // if it is, we return it for updating if neccessary.
+        // if not we return NotOwnerError to notify the caller that we cannot synchronize
+        // it.
         // need to check all tags from certificate.
         let cert_tags = self
             .client
