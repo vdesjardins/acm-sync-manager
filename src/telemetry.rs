@@ -10,7 +10,7 @@ pub fn get_trace_id() -> String {
         .span()
         .span_context()
         .trace_id()
-        .to_hex()
+        .to_string()
 }
 
 #[cfg(feature = "telemetry")]

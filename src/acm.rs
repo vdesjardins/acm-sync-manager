@@ -5,7 +5,7 @@ use aws_sdk_acm::{
     error::{self, DeleteCertificateErrorKind, GetCertificateError, GetCertificateErrorKind},
     model::{self, Tag},
     output::GetCertificateOutput,
-    Blob, Client,
+    types, Client,
 };
 use tracing::{debug, error, event, field, info, instrument, trace, warn, Level, Span};
 
@@ -123,9 +123,21 @@ impl CertificateService {
         }
 
         let result = import_builder
-            .set_certificate(cert.cert.as_ref().and_then(|v| Some(Blob::new(v.clone()))))
-            .set_certificate_chain(cert.chain.as_ref().and_then(|v| Some(Blob::new(v.clone()))))
-            .set_private_key(cert.key.as_ref().and_then(|v| Some(Blob::new(v.clone()))))
+            .set_certificate(
+                cert.cert
+                    .as_ref()
+                    .and_then(|v| Some(types::Blob::new(v.clone()))),
+            )
+            .set_certificate_chain(
+                cert.chain
+                    .as_ref()
+                    .and_then(|v| Some(types::Blob::new(v.clone()))),
+            )
+            .set_private_key(
+                cert.key
+                    .as_ref()
+                    .and_then(|v| Some(types::Blob::new(v.clone()))),
+            )
             .tags(
                 Tag::builder()
                     .key(TAG_INGRESS_NAME)
@@ -173,7 +185,7 @@ impl CertificateService {
                 .await;
 
             match co {
-                Err(aws_sdk_acm::SdkError::ServiceError {
+                Err(types::SdkError::ServiceError {
                     err:
                         error::GetCertificateError {
                             kind: GetCertificateErrorKind::ResourceNotFoundException(..),
@@ -235,7 +247,7 @@ impl CertificateService {
             .await;
 
         match result {
-            Err(aws_sdk_acm::SdkError::ServiceError {
+            Err(types::SdkError::ServiceError {
                 err:
                     error::DeleteCertificateError {
                         kind: DeleteCertificateErrorKind::ResourceNotFoundException(..),

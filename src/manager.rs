@@ -1,8 +1,4 @@
 use crate::{acm, telemetry, Error, Result};
-use aws_sdk_acm::{
-    model::{tag, Tag},
-    Blob,
-};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use k8s_openapi::api::{
