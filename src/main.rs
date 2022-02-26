@@ -11,12 +11,29 @@ use axum::{
     routing::{get, post},
     AddExtensionLayer, Json, Router,
 };
+use clap::Parser;
 use prometheus::{Encoder, TextEncoder};
 use serde_json::Value;
 use tokio::signal::unix::{signal, SignalKind};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::{prelude::*, EnvFilter, Registry};
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// prometheus metric bind address
+    #[clap(long, default_value = "127.0.0.1:8081")]
+    metrics_bind_address: SocketAddr,
+
+    /// health probe bind address
+    #[clap(long, default_value = "0.0.0.0:8080")]
+    health_probe_bind_address: SocketAddr,
+
+    /// owner tag value set on ACM certificate
+    #[clap(long, default_value = "acm-sync-manager")]
+    owner_tag_value: String,
+}
 
 async fn metrics(state: Extension<Manager>) -> (StatusCode, String) {
     let state_metrics = state.metrics();
@@ -36,6 +53,8 @@ async fn index(state: Extension<Manager>) -> (StatusCode, Json<State>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     // Setup tracing layers
     #[cfg(feature = "telemetry")]
     let telemetry = tracing_opentelemetry::layer().with_tracer(telemetry::init_tracer().await);
@@ -57,14 +76,25 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(collector).unwrap();
 
     // Start kubernetes controller
-    let (manager, drainer) = Manager::new().await;
+    let (manager, drainer) = Manager::new(args.owner_tag_value).await;
 
     // Start web server
-    info!(message = "starting server on 0.0.0:8080");
+    info!("starting metrics server on {}", args.metrics_bind_address);
+    let app_metrics = Router::new()
+        .route("/metrics", get(metrics))
+        .layer(AddExtensionLayer::new(manager.clone()))
+        .layer(TraceLayer::new_for_http());
 
+    let mut shutdown = signal(SignalKind::terminate()).expect("could not monitor for SIGTERM");
+    let server_metrics = axum::Server::bind(&args.metrics_bind_address)
+        .serve(app_metrics.into_make_service())
+        .with_graceful_shutdown(async move {
+            shutdown.recv().await;
+        });
+
+    info!("starting server on {}", args.health_probe_bind_address);
     let app = Router::new()
         .route("/", get(index))
-        .route("/metrics", get(metrics))
         .layer(AddExtensionLayer::new(manager.clone()))
         .layer(TraceLayer::new_for_http())
         // Reminder: routes added *after* TraceLayer are not subject to its logging behavior
@@ -72,7 +102,7 @@ async fn main() -> Result<()> {
         .route("/readyz", get(health));
 
     let mut shutdown = signal(SignalKind::terminate()).expect("could not monitor for SIGTERM");
-    let server_axum = axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], 8080)))
+    let server_controller = axum::Server::bind(&args.health_probe_bind_address)
         .serve(app.into_make_service())
         .with_graceful_shutdown(async move {
             shutdown.recv().await;
@@ -80,7 +110,8 @@ async fn main() -> Result<()> {
 
     tokio::select! {
         _ = drainer => warn!("controller drained"),
-        _ = server_axum => info!("actix exited"),
+        _ = server_metrics => info!("metrics exited"),
+        _ = server_controller => info!("controller exited"),
     }
     Ok(())
 }

@@ -50,6 +50,8 @@ struct Data {
     state: Arc<RwLock<State>>,
     /// Various prometheus metrics
     metrics: Metrics,
+    /// Owner tag value name
+    owner_tag_value: String,
 }
 
 #[instrument(skip(ctx), fields(trace_id))]
@@ -102,7 +104,9 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                 .set_key(data.get("tls.key").and_then(|d| Some(d.0.clone())))
                 .set_cert(data.get("tls.crt").and_then(|d| Some(d.0.clone())))
                 .set_chain(data.get("ca.crt").and_then(|d| Some(d.0.clone())));
-            let cert_result = cs.update_certificate(&ct).await;
+            let cert_result = cs
+                .update_certificate(&ct, &ctx.get_ref().owner_tag_value)
+                .await;
             match cert_result {
                 Err(Error::NotOwnerError) => {
                     return Ok(ReconcilerAction {
@@ -281,7 +285,7 @@ impl Manager {
     ///
     /// This returns a `Manager` that drives a `Controller` + a future to be awaited
     /// It is up to `main` to wait for the controller stream.
-    pub async fn new() -> (Self, BoxFuture<'static, ()>) {
+    pub async fn new(owner_tag_value: String) -> (Self, BoxFuture<'static, ()>) {
         let shared_config = aws_config::load_from_env().await;
         let aws_client = aws_sdk_acm::Client::new(&shared_config);
         let client = Client::try_default().await.expect("create client");
@@ -292,6 +296,7 @@ impl Manager {
             aws_client: aws_client.clone(),
             metrics: metrics.clone(),
             state: state.clone(),
+            owner_tag_value,
         });
 
         let secrets = Api::<Secret>::all(client.clone());

@@ -13,7 +13,6 @@ const TAG_SECRET_NAME: &str = "acm-sync-manager/secret-name";
 const TAG_NAMESPACE: &str = "acm-sync-manager/namespace";
 const TAG_INGRESS_NAME: &str = "acm-sync-manager/ingress-name";
 const TAG_OWNER: &str = "acm-sync-manager/owner";
-const TAG_DEFAULT_OWNER_VALUE: &str = "acm-sync-manager";
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Certificate {
@@ -102,8 +101,12 @@ impl CertificateService {
         CertificateService { client }
     }
 
-    pub async fn update_certificate(&self, cert: &Certificate) -> Result<Certificate, Error> {
-        let acm_cert = self.find_certificate(&cert).await?;
+    pub async fn update_certificate(
+        &self,
+        cert: &Certificate,
+        owner_tag_value: &str,
+    ) -> Result<Certificate, Error> {
+        let acm_cert = self.find_certificate(&cert, owner_tag_value).await?;
         let mut import_builder = self.client.import_certificate();
 
         // TODO: we should also compare if tags are not what we expect. if so
@@ -156,12 +159,7 @@ impl CertificateService {
                     .value(cert.namespace.clone().unwrap())
                     .build(),
             )
-            .tags(
-                Tag::builder()
-                    .key(TAG_OWNER)
-                    .value(TAG_DEFAULT_OWNER_VALUE)
-                    .build(),
-            )
+            .tags(Tag::builder().key(TAG_OWNER).value(owner_tag_value).build())
             .send()
             .await
             .map_err(|e| Error::SdkError(e.into()))?;
@@ -175,6 +173,7 @@ impl CertificateService {
     pub async fn find_certificate(
         &self,
         certificate: &Certificate,
+        owner_tag_value: &str,
     ) -> Result<Option<Certificate>, Error> {
         let acm_cert = if let Some(arn) = &certificate.arn {
             let co = self
@@ -231,7 +230,7 @@ impl CertificateService {
         }
 
         // compare tags for match
-        if tags_lookup.get(&Some(TAG_OWNER)) == Some(&Some(&*TAG_DEFAULT_OWNER_VALUE)) {
+        if tags_lookup.get(&Some(TAG_OWNER)) == Some(&Some(owner_tag_value)) {
             return Ok(Some(acm_cert));
         }
 
