@@ -1,9 +1,10 @@
 { pkgs ? import <nixpkgs> { } }:
-
+let
+  fenix = import (fetchTarball "https://github.com/nix-community/fenix/archive/main.tar.gz") { };
+in
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    # pkg-config
-    # openssl
+    fenix.stable.toolchain
     libiconv
     pkgs.darwin.apple_sdk.frameworks.Security
 
@@ -14,7 +15,5 @@ pkgs.mkShell {
     gnumake
     jq
     envsubst
-    #     # keep this line if you use bash
-    #     pkgs.bashInteractive
   ];
 }
