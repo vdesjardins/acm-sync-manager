@@ -2,6 +2,16 @@ apiVersion: v1
 entries:
   acm-sync-manager:
   - apiVersion: v2
+    appVersion: 0.0.2
+    created: "2022-02-27T01:15:28.835552887Z"
+    description: A Helm chart for Kubernetes
+    digest: 691ffa1820253773101253131d25692b0083e3da022f56e5b136a3c9f98ab24c
+    name: acm-sync-manager
+    type: application
+    urls:
+    - https://vdesjardins.github.io/acm-sync-manager/acm-sync-manager-0.0.2.tgz
+    version: 0.0.2
+  - apiVersion: v2
     appVersion: 0.0.1
     created: "2022-02-25T02:46:10.287561262Z"
     description: A Helm chart for Kubernetes
@@ -11,4 +21,4 @@ entries:
     urls:
     - https://vdesjardins.github.io/acm-sync-manager/acm-sync-manager-0.0.1.tgz
     version: 0.0.1
-generated: "2022-02-25T02:46:10.286913216Z"
+generated: "2022-02-27T01:15:28.834013657Z"
