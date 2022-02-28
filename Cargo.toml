@@ -31,7 +31,7 @@ chrono = { version = "0.4.19", features = ["serde"] }
 thiserror = "1.0.30"
 schemars = { version = "0.8.8", features = ["chrono"] }
 tracing = "0.1.31"
-tracing-subscriber = { version = "0.3.1", features = ["json", "env-filter"] }
+tracing-subscriber = { version = "0.3.9", features = ["json", "env-filter"] }
 tracing-opentelemetry = "0.17.2"
 opentelemetry = { version = "0.17.0", features = ["trace", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.10.0", features = ["tokio"], optional = true }
@@ -39,8 +39,8 @@ prometheus = "0.13.0"
 tonic = { version = "0.6.2", features = ["tokio-rustls"], optional = true }
 aws-config = "0.8.0"
 aws-sdk-acm = "0.8.0"
-axum = { version = "0.4.5" }
-tower-http = "0.2.1"
+axum = { version = "0.4.6" }
+tower-http = "0.2.3"
 clap = { version = "3.1.2", features = ["derive"] }
 
 [dependencies.kube]
