@@ -129,33 +129,36 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                         .map_err(Error::KubeError)?;
                     return Err(err);
                 }
-                Ok(cert) => {
+                Ok(cert_result) => {
+                    let cert = cert_result.cert;
                     // update LB ARN annotation on ingress resource
-                    let ingresses: Api<Ingress> = Api::namespaced(client.clone(), &ns);
-                    let ingress = ingress.clone();
-                    let patch = serde_json::json!({
-                        "apiVersion": "networking.k8s.io/v1",
-                        "kind": "Ingress",
-                        "metadata": {
-                            "name": ingress.name(),
-                            "namespace": ingress.namespace(),
-                            "annotations": {
-                                ALB_ARN_ANNOTATION: cert.arn.as_ref()
+                    if arn.is_none() || arn != cert.arn {
+                        let ingresses: Api<Ingress> = Api::namespaced(client.clone(), &ns);
+                        let ingress = ingress.clone();
+                        let patch = serde_json::json!({
+                            "apiVersion": "networking.k8s.io/v1",
+                            "kind": "Ingress",
+                            "metadata": {
+                                "name": ingress.name(),
+                                "namespace": ingress.namespace(),
+                                "annotations": {
+                                    ALB_ARN_ANNOTATION: cert.arn.as_ref()
+                                }
                             }
-                        }
-                    });
-                    let params = PatchParams::apply(ACM_MANAGER_NAME).force();
-                    let patch = Patch::Apply(&patch);
-                    ingresses
-                        .patch(&ingress.name(), &params, &patch)
-                        .await
-                        .map_err(Error::KubeError)?;
+                        });
+                        let params = PatchParams::apply(ACM_MANAGER_NAME).force();
+                        let patch = Patch::Apply(&patch);
+                        ingresses
+                            .patch(&ingress.name(), &params, &patch)
+                            .await
+                            .map_err(Error::KubeError)?;
+                    }
                     recorder
                         .publish(Event {
-                            action: "Import".into(),
-                            reason: "Imported".into(),
+                            action: "Sync".into(),
+                            reason: cert_result.state.to_string(),
                             note: Some(format!(
-                                "Certificate {} imported successfully",
+                                "Certificate {} processed successfully",
                                 &cert.arn.unwrap()
                             )),
                             type_: EventType::Normal,

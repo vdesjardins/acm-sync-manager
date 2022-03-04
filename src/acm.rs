@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 use crate::Error;
 use aws_sdk_acm::{
@@ -92,6 +92,30 @@ impl From<GetCertificateOutput> for Certificate {
     }
 }
 
+#[derive(Debug)]
+pub enum CertificateUpdateState {
+    UpToDate,
+    Imported,
+    Updated,
+}
+
+impl Display for CertificateUpdateState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+impl Default for CertificateUpdateState {
+    fn default() -> Self {
+        Self::UpToDate
+    }
+}
+
+#[derive(Default)]
+pub struct CertificateUpdateResult {
+    pub cert: Certificate,
+    pub state: CertificateUpdateState,
+}
+
 pub struct CertificateService {
     client: Client,
 }
@@ -105,9 +129,10 @@ impl CertificateService {
         &self,
         cert: &Certificate,
         owner_tag_value: &str,
-    ) -> Result<Certificate, Error> {
+    ) -> Result<CertificateUpdateResult, Error> {
         let acm_cert = self.find_certificate(&cert, owner_tag_value).await?;
         let mut import_builder = self.client.import_certificate();
+        let mut result = CertificateUpdateResult::default();
 
         // TODO: we should also compare if tags are not what we expect. if so
         // we we'll need to update them. Since we cannot update tags on re-import
@@ -120,9 +145,13 @@ impl CertificateService {
             if c.cert != cert.cert {
                 info!(message = "certificate data does not match ACM");
                 import_builder = import_builder.set_certificate_arn(c.arn.clone());
+                result.state = CertificateUpdateState::Updated;
             } else {
                 info!(message = "certificate match ACM");
-                return Ok(cert.to_owned());
+                return Ok(CertificateUpdateResult {
+                    cert: cert.to_owned(),
+                    state: CertificateUpdateState::UpToDate,
+                });
             }
         } else {
             import_builder = import_builder
@@ -145,9 +174,10 @@ impl CertificateService {
                         .build(),
                 )
                 .tags(Tag::builder().key(TAG_OWNER).value(owner_tag_value).build());
+            result.state = CertificateUpdateState::Imported;
         }
 
-        let result = import_builder
+        let import_result = import_builder
             .set_certificate(
                 cert.cert
                     .as_ref()
@@ -169,8 +199,10 @@ impl CertificateService {
 
         info!(message = "certificate data imported into ACM");
         let mut acm_cert = cert.clone();
-        acm_cert.arn = result.certificate_arn;
-        Ok(acm_cert)
+        acm_cert.arn = import_result.certificate_arn;
+        result.cert = acm_cert;
+
+        Ok(result)
     }
 
     pub async fn find_certificate(
