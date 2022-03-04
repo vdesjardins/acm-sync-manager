@@ -9,10 +9,10 @@ use aws_sdk_acm::{
 };
 use tracing::{debug, error, event, field, info, instrument, trace, warn, Level, Span};
 
-const TAG_SECRET_NAME: &str = "acm-sync-manager/secret-name";
-const TAG_NAMESPACE: &str = "acm-sync-manager/namespace";
-const TAG_INGRESS_NAME: &str = "acm-sync-manager/ingress-name";
-const TAG_OWNER: &str = "acm-sync-manager/owner";
+pub const TAG_SECRET_NAME: &str = "acm-sync-manager/secret-name";
+pub const TAG_NAMESPACE: &str = "acm-sync-manager/namespace";
+pub const TAG_INGRESS_NAME: &str = "acm-sync-manager/ingress-name";
+pub const TAG_OWNER: &str = "acm-sync-manager/owner";
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Certificate {

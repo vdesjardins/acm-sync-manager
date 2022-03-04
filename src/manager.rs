@@ -1,4 +1,5 @@
-use crate::{acm, telemetry, Error, Result};
+pub use crate::acm;
+use crate::{telemetry, Error, Result};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use k8s_openapi::api::{
@@ -35,9 +36,9 @@ use tokio::{
 };
 use tracing::{debug, error, event, field, info, instrument, trace, warn, Level, Span};
 
-const ALB_ARN_ANNOTATION: &str = "alb.ingress.kubernetes.io/certificate-arn";
+pub const ALB_ARN_ANNOTATION: &str = "alb.ingress.kubernetes.io/certificate-arn";
+pub const ACM_MANAGER_NAME: &str = "acm-sync-manager";
 const FINALIZER_NAME: &str = "acm-sync-manager.io/finalizer";
-const ACM_MANAGER_NAME: &str = "acm-sync-manager";
 
 // Context for our reconciler
 #[derive(Clone)]
