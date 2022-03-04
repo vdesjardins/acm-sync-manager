@@ -110,7 +110,8 @@ impl CertificateService {
         let mut import_builder = self.client.import_certificate();
 
         // TODO: we should also compare if tags are not what we expect. if so
-        // we we'll need to update them.
+        // we we'll need to update them. Since we cannot update tags on re-import
+        // we'll need to use add/remove tags methods
         if let Some(c) = acm_cert {
             info!(
                 "found certificate match in ACM with ARN {}",
@@ -123,6 +124,27 @@ impl CertificateService {
                 info!(message = "certificate match ACM");
                 return Ok(cert.to_owned());
             }
+        } else {
+            import_builder = import_builder
+                .tags(
+                    Tag::builder()
+                        .key(TAG_INGRESS_NAME)
+                        .value(cert.ingress_name.clone().unwrap())
+                        .build(),
+                )
+                .tags(
+                    Tag::builder()
+                        .key(TAG_SECRET_NAME)
+                        .value(cert.name.clone().unwrap())
+                        .build(),
+                )
+                .tags(
+                    Tag::builder()
+                        .key(TAG_NAMESPACE)
+                        .value(cert.namespace.clone().unwrap())
+                        .build(),
+                )
+                .tags(Tag::builder().key(TAG_OWNER).value(owner_tag_value).build());
         }
 
         let result = import_builder
@@ -141,25 +163,6 @@ impl CertificateService {
                     .as_ref()
                     .and_then(|v| Some(types::Blob::new(v.clone()))),
             )
-            .tags(
-                Tag::builder()
-                    .key(TAG_INGRESS_NAME)
-                    .value(cert.ingress_name.clone().unwrap())
-                    .build(),
-            )
-            .tags(
-                Tag::builder()
-                    .key(TAG_SECRET_NAME)
-                    .value(cert.name.clone().unwrap())
-                    .build(),
-            )
-            .tags(
-                Tag::builder()
-                    .key(TAG_NAMESPACE)
-                    .value(cert.namespace.clone().unwrap())
-                    .build(),
-            )
-            .tags(Tag::builder().key(TAG_OWNER).value(owner_tag_value).build())
             .send()
             .await
             .map_err(|e| Error::SdkError(e.into()))?;
@@ -212,7 +215,6 @@ impl CertificateService {
         // if it is, we return it for updating if neccessary.
         // if not we return NotOwnerError to notify the caller that we cannot synchronize
         // it.
-        // need to check all tags from certificate.
         let cert_tags = self
             .client
             .list_tags_for_certificate()
