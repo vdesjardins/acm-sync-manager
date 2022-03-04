@@ -39,9 +39,9 @@ prometheus = "0.13.0"
 tonic = { version = "0.6.2", features = ["tokio-rustls"], optional = true }
 aws-config = "0.8.0"
 aws-sdk-acm = "0.8.0"
-axum = { version = "0.4.6" }
+axum = { version = "0.4.8" }
 tower-http = "0.2.3"
-clap = { version = "3.1.2", features = ["derive"] }
+clap = { version = "3.1.5", features = ["derive"] }
 
 [dependencies.kube]
 version = "0.69.1"

@@ -5,11 +5,11 @@ pub use acm_sync_manager::*;
 
 use acm_sync_manager::manager::State;
 use axum::{
-    extract::Extension,
+    extract::{self, Extension},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    AddExtensionLayer, Json, Router,
+    Json, Router,
 };
 use clap::Parser;
 use prometheus::{Encoder, TextEncoder};
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
     info!("starting metrics server on {}", args.metrics_bind_address);
     let app_metrics = Router::new()
         .route("/metrics", get(metrics))
-        .layer(AddExtensionLayer::new(manager.clone()))
+        .layer(extract::Extension(manager.clone()))
         .layer(TraceLayer::new_for_http());
 
     let mut shutdown = signal(SignalKind::terminate()).expect("could not monitor for SIGTERM");
@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     info!("starting server on {}", args.health_probe_bind_address);
     let app = Router::new()
         .route("/", get(index))
-        .layer(AddExtensionLayer::new(manager.clone()))
+        .layer(extract::Extension(manager.clone()))
         .layer(TraceLayer::new_for_http())
         // Reminder: routes added *after* TraceLayer are not subject to its logging behavior
         .route("/healthz", get(health))
