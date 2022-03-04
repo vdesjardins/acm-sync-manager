@@ -84,7 +84,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                 )
             })
         })
-        .unwrap();
+        .unwrap_or([].to_vec());
 
     let secrets: Api<Secret> = Api::namespaced(client.clone(), &ns);
     for sec in secret_names.iter() {
