@@ -265,6 +265,12 @@ fn secret_mapper_func(
                     if let Some(tls) = &spec.tls {
                         for tls in tls.iter() {
                             if &tls.secret_name == &Some(secret.name()) {
+                                debug!(
+                                    "found secret {}/{} matching ingress {}",
+                                    secret.namespace().unwrap_or("unknown".into()),
+                                    secret.name(),
+                                    i.name(),
+                                );
                                 return Some(ObjectRef::from_obj(i.as_ref()));
                             }
                         }
