@@ -144,7 +144,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                             }
                         }
                     });
-                    let params = PatchParams::apply(ACM_MANAGER_NAME);
+                    let params = PatchParams::apply(ACM_MANAGER_NAME).force();
                     let patch = Patch::Apply(&patch);
                     ingresses
                         .patch(&ingress.name(), &params, &patch)
