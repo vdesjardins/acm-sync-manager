@@ -14,9 +14,6 @@ spec:
   isCA: true
   commonName: e2e-selfsigned-ca
   secretName: e2e-ca-root
-  privateKey:
-    algorithm: ECDSA
-    size: 256
   issuerRef:
     name: e2e-selfsigned-issuer
     kind: ClusterIssuer
