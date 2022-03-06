@@ -80,14 +80,8 @@ impl Certificate {
 impl From<GetCertificateOutput> for Certificate {
     fn from(cert: GetCertificateOutput) -> Self {
         let mut c = Certificate::default();
-        c.set_cert(
-            cert.certificate()
-                .and_then(|ce| Some(ce.as_bytes().to_vec())),
-        )
-        .set_chain(
-            cert.certificate_chain()
-                .and_then(|ch| Some(ch.as_bytes().to_vec())),
-        );
+        c.set_cert(cert.certificate().map(|ce| ce.as_bytes().to_vec()))
+            .set_chain(cert.certificate_chain().map(|ch| ch.as_bytes().to_vec()));
         c
     }
 }
@@ -130,7 +124,7 @@ impl CertificateService {
         cert: &Certificate,
         owner_tag_value: &str,
     ) -> Result<CertificateUpdateResult, Error> {
-        let acm_cert = self.find_certificate(&cert, owner_tag_value).await?;
+        let acm_cert = self.find_certificate(cert, owner_tag_value).await?;
         let mut import_builder = self.client.import_certificate();
         let mut result = CertificateUpdateResult::default();
 
@@ -144,7 +138,7 @@ impl CertificateService {
             );
             if c.cert != cert.cert {
                 info!(message = "certificate data does not match ACM");
-                import_builder = import_builder.set_certificate_arn(c.arn.clone());
+                import_builder = import_builder.set_certificate_arn(c.arn);
                 result.state = CertificateUpdateState::Updated;
             } else {
                 info!(message = "certificate match ACM");
@@ -178,21 +172,9 @@ impl CertificateService {
         }
 
         let import_result = import_builder
-            .set_certificate(
-                cert.cert
-                    .as_ref()
-                    .and_then(|v| Some(types::Blob::new(v.clone()))),
-            )
-            .set_certificate_chain(
-                cert.chain
-                    .as_ref()
-                    .and_then(|v| Some(types::Blob::new(v.clone()))),
-            )
-            .set_private_key(
-                cert.key
-                    .as_ref()
-                    .and_then(|v| Some(types::Blob::new(v.clone()))),
-            )
+            .set_certificate(cert.cert.as_ref().map(|v| types::Blob::new(v.clone())))
+            .set_certificate_chain(cert.chain.as_ref().map(|v| types::Blob::new(v.clone())))
+            .set_private_key(cert.key.as_ref().map(|v| types::Blob::new(v.clone())))
             .send()
             .await
             .map_err(|e| Error::SdkError(e.into()))?;
@@ -258,7 +240,7 @@ impl CertificateService {
         // build tag lookup table
         let mut tags_lookup = HashMap::new();
         if let Some(tags) = cert_tags.tags() {
-            tags.into_iter().for_each(|t| {
+            tags.iter().for_each(|t| {
                 tags_lookup.insert(t.key(), t.value());
             });
         }
@@ -287,8 +269,8 @@ impl CertificateService {
                         ..
                     },
                 ..
-            }) => return Ok(()),
-            Err(err) => return Err(Error::SdkError(err.into())),
+            }) => Ok(()),
+            Err(err) => Err(Error::SdkError(err.into())),
             Ok(_) => Ok(()),
         }
     }

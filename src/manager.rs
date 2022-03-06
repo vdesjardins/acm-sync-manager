@@ -70,22 +70,20 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
     let arn = ingress
         .annotations()
         .get_key_value(ALB_ARN_ANNOTATION)
-        .map_or(None, |e| Some(e.1.to_owned()));
+        .map(|e| e.1.to_owned());
 
     let secret_names: Vec<&String> = ingress
         .spec
         .as_ref()
         .and_then(|spec| {
-            spec.tls.as_ref().and_then(|itls| {
-                Some(
-                    itls.iter()
-                        .filter(|tls| tls.secret_name.is_some())
-                        .map(|tls| tls.secret_name.as_ref().unwrap())
-                        .collect(),
-                )
+            spec.tls.as_ref().map(|itls| {
+                itls.iter()
+                    .filter(|tls| tls.secret_name.is_some())
+                    .map(|tls| tls.secret_name.as_ref().unwrap())
+                    .collect()
             })
         })
-        .unwrap_or([].to_vec());
+        .unwrap_or_else(|| [].to_vec());
 
     let secrets: Api<Secret> = Api::namespaced(client.clone(), &ns);
     for sec in secret_names.iter() {
@@ -102,9 +100,9 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                 .namespace(&ns)
                 .ingress_name(&name)
                 .set_arn(arn.clone())
-                .set_key(data.get("tls.key").and_then(|d| Some(d.0.clone())))
-                .set_cert(data.get("tls.crt").and_then(|d| Some(d.0.clone())))
-                .set_chain(data.get("ca.crt").and_then(|d| Some(d.0.clone())));
+                .set_key(data.get("tls.key").map(|d| d.0.clone()))
+                .set_cert(data.get("tls.crt").map(|d| d.0.clone()))
+                .set_chain(data.get("ca.crt").map(|d| d.0.clone()));
             let cert_result = cs
                 .update_certificate(&ct, &ctx.get_ref().owner_tag_value)
                 .await;
@@ -194,11 +192,11 @@ async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Reconciler
     let arn = ingress
         .annotations()
         .get_key_value(ALB_ARN_ANNOTATION)
-        .map_or(None, |e| Some(e.1.to_owned()));
+        .map(|e| Some(e.1.to_owned()));
     if arn.is_some() {
         let cs = acm::CertificateService::new(ctx.get_ref().aws_client.clone());
         let mut ct = acm::Certificate::default();
-        ct.set_arn(arn.clone());
+        ct.set_arn(arn.unwrap());
         cs.delete_certificate(&ct).await?;
     }
 
@@ -264,10 +262,10 @@ fn secret_mapper_func(
                 if let Some(spec) = &i.spec {
                     if let Some(tls) = &spec.tls {
                         for tls in tls.iter() {
-                            if &tls.secret_name == &Some(secret.name()) {
+                            if tls.secret_name == Some(secret.name()) {
                                 debug!(
                                     "found secret {}/{} matching ingress {}",
-                                    secret.namespace().unwrap_or("unknown".into()),
+                                    secret.namespace().unwrap_or_else(|| "unknown".into()),
                                     secret.name(),
                                     i.name(),
                                 );
@@ -304,7 +302,7 @@ impl Manager {
         let context = Context::new(Data {
             client: client.clone(),
             aws_client: aws_client.clone(),
-            metrics: metrics.clone(),
+            metrics,
             state: state.clone(),
             owner_tag_value,
         });
