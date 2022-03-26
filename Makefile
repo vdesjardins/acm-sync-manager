@@ -195,8 +195,3 @@ upgrade-local: uninstall-local install-local
 .PHONY: cluster
 cluster: create-local-registry kind-cluster deploy-cert-manager setup-eks-webhook ## Sets up a kind cluster using the latest commit on the current branch
 
-.PHONY: e2etest
-e2etest: install-local ## Run end to end tests
-	kind get kubeconfig --name $(K8S_CLUSTER_NAME) > $(TEST_KUBECONFIG_LOCATION)
-	go test -v ./e2e/... -coverprofile cover.out
-

@@ -12,7 +12,7 @@ use kube::{
     api::{Api, ListParams, Patch, PatchParams, PostParams, ResourceExt},
     client::Client,
     runtime::{
-        controller::{Context, Controller, ReconcilerAction},
+        controller::{Action, Context, Controller},
         events::{Event, EventType, Recorder, Reporter},
         finalizer,
         reflector::{ObjectRef, Store},
@@ -56,7 +56,7 @@ struct Data {
 }
 
 #[instrument(skip(ctx), fields(trace_id))]
-async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAction> {
+async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
     let trace_id = telemetry::get_trace_id();
     Span::current().record("trace_id", &field::display(&trace_id));
     let start = Instant::now();
@@ -108,9 +108,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
                 .await;
             match cert_result {
                 Err(Error::NotOwnerError) => {
-                    return Ok(ReconcilerAction {
-                        requeue_after: None,
-                    })
+                    return Ok(Action::requeue(Duration::from_secs(3600 / 2)))
                 }
                 Err(err) => {
                     recorder
@@ -181,12 +179,10 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAc
     ctx.get_ref().metrics.handled_events.inc();
 
     // If no events were received, check back every 30 minutes
-    Ok(ReconcilerAction {
-        requeue_after: Some(Duration::from_secs(3600 / 2)),
-    })
+    Ok(Action::requeue(Duration::from_secs(3600 / 2)))
 }
 
-async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<ReconcilerAction> {
+async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
     println!("Cleaning up {:?}", ingress);
 
     let arn = ingress
@@ -200,9 +196,7 @@ async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Reconciler
         cs.delete_certificate(&ct).await?;
     }
 
-    Ok(ReconcilerAction {
-        requeue_after: None,
-    })
+    Ok(Action::await_change())
 }
 
 /// Metrics exposed on /metrics
@@ -337,9 +331,7 @@ impl Manager {
                 },
                 |err, _| {
                     warn!("reconcile failed: {:?}", err);
-                    ReconcilerAction {
-                        requeue_after: Some(Duration::from_secs(120)),
-                    }
+                    Action::requeue(Duration::from_secs(120))
                 },
                 context,
             )
