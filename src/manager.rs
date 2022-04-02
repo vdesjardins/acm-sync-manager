@@ -2,12 +2,15 @@ pub use crate::acm;
 use crate::{telemetry, Error, Result};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use k8s_openapi::{api::{
-    self,
-    core::v1::{ObjectReference, Secret},
-    networking::v1::Ingress,
-    networking::v1::IngressSpec,
-}, ByteString};
+use k8s_openapi::{
+    api::{
+        self,
+        core::v1::{ObjectReference, Secret},
+        networking::v1::Ingress,
+        networking::v1::IngressSpec,
+    },
+    ByteString,
+};
 use kube::{
     api::{Api, ListParams, Patch, PatchParams, PostParams, ResourceExt},
     client::Client,
@@ -96,7 +99,8 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
         if let Some(data) = secret.data {
             let (cert, chain) = extract_cert_and_chain(
                 data.get("tls.crt").map(|d| d.0.clone()).unwrap_or_default(),
-                data.get("ca.crt").map(|d| d.0.clone()).unwrap_or_default());
+                data.get("ca.crt").map(|d| d.0.clone()).unwrap_or_default(),
+            );
 
             let cs = acm::CertificateService::new(ctx.get_ref().aws_client.clone());
             let mut ct = acm::Certificate::default();
@@ -189,7 +193,11 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
 }
 
 async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
-    println!("Cleaning up {:?}", ingress);
+    info!(
+        "Cleaning up ingress {}/{}",
+        &ingress.namespace().unwrap_or_default(),
+        &ingress.name()
+    );
 
     let arn = ingress
         .annotations()
@@ -214,7 +222,10 @@ fn extract_cert_and_chain(chain: Vec<u8>, root: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
     let cert: Vec<&str> = lines.by_ref().take(index.unwrap() + 1).collect();
     let chain: Vec<&str> = lines.chain(root_str.lines()).collect();
 
-    return (cert.join("\n").as_bytes().into(), chain.join("\n").as_bytes().into())
+    return (
+        cert.join("\n").as_bytes().into(),
+        chain.join("\n").as_bytes().into(),
+    );
 }
 
 /// Metrics exposed on /metrics
@@ -379,11 +390,16 @@ mod tests {
     fn extract_cert_and_chain_test() {
         let cert_chain_input: Vec<u8> = "-----BEGIN CERTIFICATE
 this is the cert
------END CERTIFICATE".as_bytes().into();
+-----END CERTIFICATE"
+            .as_bytes()
+            .into();
 
         let (cert, chain) = extract_cert_and_chain(cert_chain_input.clone(), vec![]);
 
-        assert_eq!(String::from_utf8_lossy(&cert), String::from_utf8_lossy(&cert_chain_input));
+        assert_eq!(
+            String::from_utf8_lossy(&cert),
+            String::from_utf8_lossy(&cert_chain_input)
+        );
         assert_eq!(String::from_utf8_lossy(&chain), "");
 
         let cert_input = "-----BEGIN CERTIFICATE -----
@@ -392,7 +408,7 @@ this is the cert entry
         let chain_input = "-----BEGIN CERTIFICATE -----
 this is the chain entry
 -----END CERTIFICATE -----";
-        let cert_chain_input: Vec<u8> = [ cert_input, chain_input ].join("\n").as_bytes().into();
+        let cert_chain_input: Vec<u8> = [cert_input, chain_input].join("\n").as_bytes().into();
 
         let (cert, chain) = extract_cert_and_chain(cert_chain_input, vec![]);
 
@@ -408,11 +424,14 @@ this is the chain entry
         let root_input = "-----BEGIN CERTIFICATE -----
 this is the root entry
 -----END CERTIFICATE -----";
-        let cert_chain_input: Vec<u8> = [ cert_input, chain_input ].join("\n").as_bytes().into();
+        let cert_chain_input: Vec<u8> = [cert_input, chain_input].join("\n").as_bytes().into();
 
         let (cert, chain) = extract_cert_and_chain(cert_chain_input, root_input.as_bytes().into());
 
         assert_eq!(String::from_utf8_lossy(&cert), cert_input);
-        assert_eq!(String::from_utf8_lossy(&chain), [chain_input, root_input].join("\n"));
+        assert_eq!(
+            String::from_utf8_lossy(&chain),
+            [chain_input, root_input].join("\n")
+        );
     }
 }
