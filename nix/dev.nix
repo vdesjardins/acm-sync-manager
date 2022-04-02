@@ -1,5 +1,4 @@
-{ libiconv
-, awscli2
+{ awscli2
 , darwin
 , envsubst
 , fenix
@@ -9,6 +8,7 @@
 , kubectl
 , kubernetes-helm
 , lib
+, libiconv
 , mkShell
 , stdenv
 }:
