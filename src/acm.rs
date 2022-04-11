@@ -57,12 +57,20 @@ impl Certificate {
     }
 
     pub fn set_cert(&mut self, cert: Option<Vec<u8>>) -> &mut Certificate {
-        self.cert = cert;
+        if let Some(c) = cert {
+            self.cert = Some(trim_ascii_whitespace(&c).to_vec());
+        } else {
+            self.cert = cert;
+        }
         self
     }
 
     pub fn set_chain(&mut self, chain: Option<Vec<u8>>) -> &mut Certificate {
-        self.chain = chain;
+        if let Some(c) = chain {
+            self.chain = Some(trim_ascii_whitespace(&c).to_vec());
+        } else {
+            self.chain = chain;
+        }
         self
     }
 
@@ -137,7 +145,7 @@ impl CertificateService {
                 c.arn.clone().unwrap()
             );
             if c.cert != cert.cert {
-                info!(message = "certificate data does not match ACM");
+                info!("certificate data does not match ACM");
                 import_builder = import_builder.set_certificate_arn(c.arn);
                 result.state = CertificateUpdateState::Updated;
             } else {
@@ -274,4 +282,13 @@ impl CertificateService {
             Ok(_) => Ok(()),
         }
     }
+}
+
+pub fn trim_ascii_whitespace(x: &[u8]) -> &[u8] {
+    let from = match x.iter().position(|x| !x.is_ascii_whitespace()) {
+        Some(i) => i,
+        None => return &x[0..0],
+    };
+    let to = x.iter().rposition(|x| !x.is_ascii_whitespace()).unwrap();
+    &x[from..=to]
 }
