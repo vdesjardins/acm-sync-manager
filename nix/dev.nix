@@ -10,6 +10,8 @@
 , lib
 , libiconv
 , mkShell
+, openssl
+, pkg-config
 , stdenv
 }:
 mkShell {
@@ -17,6 +19,8 @@ mkShell {
     fenix.stable.toolchain
 
     libiconv
+    openssl
+    pkg-config
 
     kind
     awscli2
