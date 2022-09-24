@@ -15,7 +15,7 @@ use kube::{
     api::{Api, ListParams, Patch, PatchParams, PostParams, ResourceExt},
     client::Client,
     runtime::{
-        controller::{Action, Context, Controller},
+        controller::{Action, Controller},
         events::{Event, EventType, Recorder, Reporter},
         finalizer,
         reflector::{ObjectRef, Store},
@@ -59,16 +59,16 @@ struct Data {
 }
 
 #[instrument(skip(ctx), fields(trace_id))]
-async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
+async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
     let trace_id = telemetry::get_trace_id();
     Span::current().record("trace_id", &field::display(&trace_id));
     let start = Instant::now();
 
-    let client = ctx.get_ref().client.clone();
-    ctx.get_ref().state.write().await.last_event = Utc::now();
-    let reporter = ctx.get_ref().state.read().await.reporter.clone();
+    let client = ctx.client.clone();
+    ctx.state.write().await.last_event = Utc::now();
+    let reporter = ctx.state.read().await.reporter.clone();
     let recorder = Recorder::new(client.clone(), reporter, ingress.object_ref(&()));
-    let name = ingress.name();
+    let name = ingress.name_any();
     let ns = ingress.namespace().expect("ingress is namespaced");
     let arn = ingress
         .annotations()
@@ -102,7 +102,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
                 data.get("ca.crt").map(|d| d.0.clone()).unwrap_or_default(),
             );
 
-            let cs = acm::CertificateService::new(ctx.get_ref().aws_client.clone());
+            let cs = acm::CertificateService::new(ctx.aws_client.clone());
             let mut ct = acm::Certificate::default();
             ct.name(&name)
                 .namespace(&ns)
@@ -112,9 +112,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
                 .set_cert(Some(cert))
                 .set_chain(Some(chain));
 
-            let cert_result = cs
-                .update_certificate(&ct, &ctx.get_ref().owner_tag_value)
-                .await;
+            let cert_result = cs.update_certificate(&ct, &ctx.owner_tag_value).await;
 
             match cert_result {
                 Err(Error::NotOwnerError) => {
@@ -146,7 +144,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
                             "apiVersion": "networking.k8s.io/v1",
                             "kind": "Ingress",
                             "metadata": {
-                                "name": ingress.name(),
+                                "name": ingress.name_any(),
                                 "namespace": ingress.namespace(),
                                 "annotations": {
                                     ALB_ARN_ANNOTATION: cert.arn.as_ref()
@@ -156,7 +154,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
                         let params = PatchParams::apply(ACM_MANAGER_NAME).force();
                         let patch = Patch::Apply(&patch);
                         ingresses
-                            .patch(&ingress.name(), &params, &patch)
+                            .patch(&ingress.name_any(), &params, &patch)
                             .await
                             .map_err(Error::KubeError)?;
                     }
@@ -180,23 +178,22 @@ async fn apply(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
 
     let duration = start.elapsed().as_millis() as f64 / 1000.0;
     //let ex = Exemplar::new_with_labels(duration, HashMap::from([("trace_id".to_string(), trace_id)]);
-    ctx.get_ref()
-        .metrics
+    ctx.metrics
         .reconcile_duration
         .with_label_values(&[])
         .observe(duration);
     //.observe_with_exemplar(duration, ex);
-    ctx.get_ref().metrics.handled_events.inc();
+    ctx.metrics.handled_events.inc();
 
     // If no events were received, check back every 30 minutes
     Ok(Action::requeue(Duration::from_secs(3600 / 2)))
 }
 
-async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
+async fn cleanup(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
     info!(
         "Cleaning up ingress {}/{}",
         &ingress.namespace().unwrap_or_default(),
-        &ingress.name()
+        &ingress.name_any()
     );
 
     let arn = ingress
@@ -204,7 +201,7 @@ async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
         .get_key_value(ALB_ARN_ANNOTATION)
         .map(|e| Some(e.1.to_owned()));
     if arn.is_some() {
-        let cs = acm::CertificateService::new(ctx.get_ref().aws_client.clone());
+        let cs = acm::CertificateService::new(ctx.aws_client.clone());
         let mut ct = acm::Certificate::default();
         ct.set_arn(arn.unwrap());
         cs.delete_certificate(&ct).await?;
@@ -214,18 +211,18 @@ async fn cleanup(ingress: Arc<Ingress>, ctx: Context<Data>) -> Result<Action> {
 }
 
 fn extract_cert_and_chain(chain: Vec<u8>, root: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
-    let chain_str = String::from_utf8_lossy(&chain);
-    let root_str = String::from_utf8_lossy(&root);
+    let index = chain
+        .split(|c| c == &b'\n')
+        .position(|l| l.starts_with(b"-----END "));
+    let lines = &mut chain.split(|c| c == &b'\n');
+    let cert: Vec<&[u8]> = lines.by_ref().take(index.unwrap() + 1).collect();
+    let chain: Vec<&[u8]> = if root.is_empty() {
+        lines.collect()
+    } else {
+        lines.chain(root.split(|c| c == &b'\n')).collect()
+    };
 
-    let index = chain_str.lines().position(|l| l.starts_with("-----END "));
-    let lines = &mut chain_str.lines();
-    let cert: Vec<&str> = lines.by_ref().take(index.unwrap() + 1).collect();
-    let chain: Vec<&str> = lines.chain(root_str.lines()).collect();
-
-    return (
-        cert.join("\n").as_bytes().into(),
-        chain.join("\n").as_bytes().into(),
-    );
+    (cert.join(&b'\n'), chain.join(&b'\n'))
 }
 
 /// Metrics exposed on /metrics
@@ -285,12 +282,12 @@ fn secret_mapper_func(
                 if let Some(spec) = &i.spec {
                     if let Some(tls) = &spec.tls {
                         for tls in tls.iter() {
-                            if tls.secret_name == Some(secret.name()) {
+                            if tls.secret_name == Some(secret.name_any()) {
                                 debug!(
                                     "found secret {}/{} matching ingress {}",
                                     secret.namespace().unwrap_or_else(|| "unknown".into()),
-                                    secret.name(),
-                                    i.name(),
+                                    secret.name_any(),
+                                    i.name_any(),
                                 );
                                 return Some(ObjectRef::from_obj(i.as_ref()));
                             }
@@ -322,7 +319,7 @@ impl Manager {
         let client = Client::try_default().await.expect("create client");
         let metrics = Metrics::new();
         let state = Arc::new(RwLock::new(State::new()));
-        let context = Context::new(Data {
+        let context = Arc::new(Data {
             client: client.clone(),
             aws_client: aws_client.clone(),
             metrics,
@@ -388,50 +385,48 @@ mod tests {
 
     #[test]
     fn extract_cert_and_chain_test() {
-        let cert_chain_input: Vec<u8> = "-----BEGIN CERTIFICATE
+        let cert_chain_input: &[u8] = "-----BEGIN CERTIFICATE
 this is the cert
 -----END CERTIFICATE"
-            .as_bytes()
-            .into();
+            .as_bytes();
 
-        let (cert, chain) = extract_cert_and_chain(cert_chain_input.clone(), vec![]);
+        let (cert, chain) = extract_cert_and_chain(cert_chain_input.to_vec(), vec![]);
 
-        assert_eq!(
-            String::from_utf8_lossy(&cert),
-            String::from_utf8_lossy(&cert_chain_input)
-        );
-        assert_eq!(String::from_utf8_lossy(&chain), "");
+        assert_eq!(&cert, &cert_chain_input);
+        assert_eq!(&chain, b"");
 
-        let cert_input = "-----BEGIN CERTIFICATE -----
+        let cert_input: &[u8] = "-----BEGIN CERTIFICATE -----
 this is the cert entry
------END CERTIFICATE -----";
-        let chain_input = "-----BEGIN CERTIFICATE -----
+-----END CERTIFICATE -----"
+            .as_bytes();
+        let chain_input: &[u8] = "-----BEGIN CERTIFICATE -----
 this is the chain entry
------END CERTIFICATE -----";
-        let cert_chain_input: Vec<u8> = [cert_input, chain_input].join("\n").as_bytes().into();
+-----END CERTIFICATE -----"
+            .as_bytes();
+        let cert_chain_input: &[u8] = &[cert_input, chain_input].join(&b'\n');
 
-        let (cert, chain) = extract_cert_and_chain(cert_chain_input, vec![]);
+        let (cert, chain) = extract_cert_and_chain(cert_chain_input.to_vec(), vec![]);
 
-        assert_eq!(String::from_utf8_lossy(&cert), cert_input);
-        assert_eq!(String::from_utf8_lossy(&chain), chain_input);
+        assert_eq!(cert, cert_input);
+        assert_eq!(chain, chain_input);
 
-        let cert_input = "-----BEGIN CERTIFICATE -----
+        let cert_input: &[u8] = "-----BEGIN CERTIFICATE -----
 this is the cert entry
------END CERTIFICATE -----";
-        let chain_input = "-----BEGIN CERTIFICATE -----
+-----END CERTIFICATE -----"
+            .as_bytes();
+        let chain_input: &[u8] = "-----BEGIN CERTIFICATE -----
 this is the chain entry
------END CERTIFICATE -----";
-        let root_input = "-----BEGIN CERTIFICATE -----
+-----END CERTIFICATE -----"
+            .as_bytes();
+        let root_input: &[u8] = "-----BEGIN CERTIFICATE -----
 this is the root entry
------END CERTIFICATE -----";
-        let cert_chain_input: Vec<u8> = [cert_input, chain_input].join("\n").as_bytes().into();
+-----END CERTIFICATE -----"
+            .as_bytes();
+        let cert_chain_input: &[u8] = &[cert_input, chain_input].join(&b'\n');
 
-        let (cert, chain) = extract_cert_and_chain(cert_chain_input, root_input.as_bytes().into());
+        let (cert, chain) = extract_cert_and_chain(cert_chain_input.to_vec(), root_input.to_vec());
 
-        assert_eq!(String::from_utf8_lossy(&cert), cert_input);
-        assert_eq!(
-            String::from_utf8_lossy(&chain),
-            [chain_input, root_input].join("\n")
-        );
+        assert_eq!(cert, cert_input);
+        assert_eq!(chain, [chain_input, root_input].join(&b'\n'));
     }
 }
