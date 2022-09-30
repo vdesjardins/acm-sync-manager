@@ -3,6 +3,7 @@
 , envsubst
 , fenix
 , gnumake
+, grpc-tools
 , jq
 , kind
 , kubectl
@@ -21,6 +22,7 @@ mkShell {
     libiconv
     openssl
     pkg-config
+    grpc-tools
 
     kind
     awscli2
