@@ -14,7 +14,7 @@ pub const TAG_NAMESPACE: &str = "acm-sync-manager/namespace";
 pub const TAG_INGRESS_NAME: &str = "acm-sync-manager/ingress-name";
 pub const TAG_OWNER: &str = "acm-sync-manager/owner";
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct Certificate {
     pub arn: Option<String>,
     pub name: Option<String>,

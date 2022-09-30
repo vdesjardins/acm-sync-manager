@@ -81,8 +81,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
         .and_then(|spec| {
             spec.tls.as_ref().map(|itls| {
                 itls.iter()
-                    .filter(|tls| tls.secret_name.is_some())
-                    .map(|tls| tls.secret_name.as_ref().unwrap())
+                    .filter_map(|tls| tls.secret_name.as_ref())
                     .collect()
             })
         })
@@ -355,7 +354,7 @@ impl Manager {
                         .await
                     }
                 },
-                |err, _| {
+                |_obj, err, _data| {
                     warn!("reconcile failed: {:?}", err);
                     Action::requeue(Duration::from_secs(120))
                 },
