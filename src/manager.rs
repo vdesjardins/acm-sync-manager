@@ -1,5 +1,6 @@
 pub use crate::acm;
-use crate::{telemetry, Error, Result};
+use crate::{acm::CertificateSpec, telemetry, Error, Metrics, Result};
+use aws_config::BehaviorVersion;
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use k8s_openapi::{
@@ -17,8 +18,9 @@ use kube::{
     runtime::{
         controller::{Action, Controller},
         events::{Event, EventType, Recorder, Reporter},
-        finalizer,
+        finalizer::{self, finalizer, Event as Finalizer},
         reflector::{ObjectRef, Store},
+        watcher::Config,
     },
     CustomResource, Resource,
 };
@@ -45,29 +47,78 @@ const FINALIZER_NAME: &str = "acm-sync-manager.io/finalizer";
 
 // Context for our reconciler
 #[derive(Clone)]
-struct Data {
+pub struct Context {
     /// kubernetes client
     client: Client,
+    /// Event recorder
+    recorder: Recorder,
+    /// Diagnostics read by the web server
+    pub diagnostics: Arc<RwLock<Diagnostics>>,
     /// AWS ACM client
     aws_client: aws_sdk_acm::Client,
-    /// In memory state
-    state: Arc<RwLock<State>>,
     /// Various prometheus metrics
-    metrics: Metrics,
+    metrics: Arc<Metrics>,
     /// Owner tag value name
     owner_tag_value: String,
 }
 
-#[instrument(skip(ctx), fields(trace_id))]
-async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
+/// Diagnostics to be exposed by the web server
+#[derive(Clone, Serialize)]
+pub struct Diagnostics {
+    #[serde(deserialize_with = "from_ts")]
+    pub last_event: DateTime<Utc>,
+    #[serde(skip)]
+    pub reporter: Reporter,
+}
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self {
+            last_event: Utc::now(),
+            reporter: "doc-controller".into(),
+        }
+    }
+}
+impl Diagnostics {
+    fn recorder(&self, client: Client) -> Recorder {
+        Recorder::new(client, self.reporter.clone())
+    }
+}
+
+fn error_policy(ingress: Arc<Ingress>, error: &Error, ctx: Arc<Context>) -> Action {
+    warn!("reconcile failed: {:?}", error);
+    ctx.metrics.reconcile.set_failure(&ingress, error);
+    Action::requeue(Duration::from_secs(5 * 60))
+}
+
+#[instrument(skip(ctx, ingress), fields(trace_id))]
+async fn reconcile(ingress: Arc<Ingress>, ctx: Arc<Context>) -> Result<Action> {
     let trace_id = telemetry::get_trace_id();
-    Span::current().record("trace_id", &field::display(&trace_id));
-    let start = Instant::now();
+    if trace_id != opentelemetry::trace::TraceId::INVALID {
+        Span::current().record("trace_id", field::display(&trace_id));
+    }
+    let _timer = ctx.metrics.reconcile.count_and_measure(&trace_id);
+    ctx.diagnostics.write().await.last_event = Utc::now();
+    let ns = ingress.namespace().unwrap(); // doc is namespace scoped
+    let ingresses: Api<Ingress> = Api::namespaced(ctx.client.clone(), &ns);
+
+    info!("Reconciling Ingress \"{}\" in {}", ingress.name_any(), ns);
+    finalizer(&ingresses, FINALIZER_NAME, ingress, |event| async {
+        match event {
+            Finalizer::Apply(ingress) => apply(ingress, ctx.clone()).await,
+            Finalizer::Cleanup(ingress) => cleanup(ingress, ctx.clone()).await,
+        }
+    })
+    .await
+    .map_err(|e| Error::FinalizerError(Box::new(e)))
+}
+
+#[instrument(skip(ctx), fields(trace_id))]
+async fn apply(ingress: Arc<Ingress>, ctx: Arc<Context>) -> Result<Action> {
+    let trace_id = telemetry::get_trace_id();
+    Span::current().record("trace_id", field::display(&trace_id));
 
     let client = ctx.client.clone();
-    ctx.state.write().await.last_event = Utc::now();
-    let reporter = ctx.state.read().await.reporter.clone();
-    let recorder = Recorder::new(client.clone(), reporter, ingress.object_ref(&()));
+    ctx.diagnostics.write().await.last_event = Utc::now();
     let name = ingress.name_any();
     let ns = ingress.namespace().expect("ingress is namespaced");
     let arn = ingress
@@ -102,7 +153,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
             );
 
             let cs = acm::CertificateService::new(ctx.aws_client.clone());
-            let mut ct = acm::Certificate::default();
+            let mut ct = acm::Certificate::new(&name, acm::CertificateSpec::default());
             ct.name(&name)
                 .namespace(&ns)
                 .ingress_name(&name)
@@ -113,22 +164,27 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
 
             let cert_result = cs.update_certificate(&ct, &ctx.owner_tag_value).await;
 
+            let obj_ref = ct.object_ref(&());
+
             match cert_result {
                 Err(Error::NotOwnerError) => {
                     return Ok(Action::requeue(Duration::from_secs(3600 / 2)))
                 }
                 Err(err) => {
-                    recorder
-                        .publish(Event {
-                            action: "Import".into(),
-                            reason: "ImportError".into(),
-                            note: Some(format!(
-                                "Unable to import certificate for ingress {}",
-                                &err
-                            )),
-                            type_: EventType::Warning,
-                            secondary: None,
-                        })
+                    ctx.recorder
+                        .publish(
+                            &Event {
+                                action: "Import".into(),
+                                reason: "ImportError".into(),
+                                note: Some(format!(
+                                    "Unable to import certificate for ingress {}",
+                                    &err
+                                )),
+                                type_: EventType::Warning,
+                                secondary: None,
+                            },
+                            &obj_ref,
+                        )
                         .await
                         .map_err(Error::KubeError)?;
                     return Err(err);
@@ -136,7 +192,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
                 Ok(cert_result) => {
                     let cert = cert_result.cert;
                     // update LB ARN annotation on ingress resource
-                    if arn.is_none() || arn != cert.arn {
+                    if arn.is_none() || arn != cert.spec.arn {
                         let ingresses: Api<Ingress> = Api::namespaced(client.clone(), &ns);
                         let ingress = ingress.clone();
                         let patch = serde_json::json!({
@@ -146,7 +202,7 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
                                 "name": ingress.name_any(),
                                 "namespace": ingress.namespace(),
                                 "annotations": {
-                                    ALB_ARN_ANNOTATION: cert.arn.as_ref()
+                                    ALB_ARN_ANNOTATION: cert.spec.arn.as_ref()
                                 }
                             }
                         });
@@ -157,17 +213,20 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
                             .await
                             .map_err(Error::KubeError)?;
                     }
-                    recorder
-                        .publish(Event {
-                            action: "Sync".into(),
-                            reason: cert_result.state.to_string(),
-                            note: Some(format!(
-                                "Certificate {} processed successfully",
-                                &cert.arn.unwrap()
-                            )),
-                            type_: EventType::Normal,
-                            secondary: None,
-                        })
+                    ctx.recorder
+                        .publish(
+                            &Event {
+                                action: "Sync".into(),
+                                reason: cert_result.state.to_string(),
+                                note: Some(format!(
+                                    "Certificate {} processed successfully",
+                                    &cert.spec.arn.unwrap()
+                                )),
+                                type_: EventType::Normal,
+                                secondary: None,
+                            },
+                            &obj_ref,
+                        )
                         .await
                         .map_err(Error::KubeError)?;
                 }
@@ -175,20 +234,11 @@ async fn apply(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
         }
     }
 
-    let duration = start.elapsed().as_millis() as f64 / 1000.0;
-    //let ex = Exemplar::new_with_labels(duration, HashMap::from([("trace_id".to_string(), trace_id)]);
-    ctx.metrics
-        .reconcile_duration
-        .with_label_values(&[])
-        .observe(duration);
-    //.observe_with_exemplar(duration, ex);
-    ctx.metrics.handled_events.inc();
-
     // If no events were received, check back every 30 minutes
     Ok(Action::requeue(Duration::from_secs(3600 / 2)))
 }
 
-async fn cleanup(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
+async fn cleanup(ingress: Arc<Ingress>, ctx: Arc<Context>) -> Result<Action> {
     info!(
         "Cleaning up ingress {}/{}",
         &ingress.namespace().unwrap_or_default(),
@@ -201,7 +251,7 @@ async fn cleanup(ingress: Arc<Ingress>, ctx: Arc<Data>) -> Result<Action> {
         .map(|e| Some(e.1.to_owned()));
     if arn.is_some() {
         let cs = acm::CertificateService::new(ctx.aws_client.clone());
-        let mut ct = acm::Certificate::default();
+        let mut ct = acm::Certificate::new("", acm::CertificateSpec::default());
         ct.set_arn(arn.unwrap());
         cs.delete_certificate(&ct).await?;
     }
@@ -224,47 +274,50 @@ fn extract_cert_and_chain(chain: Vec<u8>, root: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
     (cert.join(&b'\n'), chain.join(&b'\n'))
 }
 
-/// Metrics exposed on /metrics
-#[derive(Clone)]
-pub struct Metrics {
-    pub handled_events: IntCounter,
-    pub reconcile_duration: HistogramVec,
-}
-impl Metrics {
-    fn new() -> Self {
-        let reconcile_histogram = register_histogram_vec!(
-            "secret_controller_reconcile_duration_seconds",
-            "The duration of reconcile to complete in seconds",
-            &[],
-            vec![0.01, 0.1, 0.25, 0.5, 1., 5., 15., 60.]
-        )
-        .unwrap();
-
-        Metrics {
-            handled_events: register_int_counter!(
-                "secret_controller_handled_events",
-                "handled events"
-            )
-            .unwrap(),
-            reconcile_duration: reconcile_histogram,
-        }
-    }
-}
-
 /// In-memory reconciler state exposed on /
-#[derive(Clone, Serialize)]
+#[derive(Clone, Default)]
 pub struct State {
-    #[serde(deserialize_with = "from_ts")]
-    pub last_event: DateTime<Utc>,
-    #[serde(skip)]
-    pub reporter: Reporter,
+    /// Diagnostics populated by the reconciler
+    diagnostics: Arc<RwLock<Diagnostics>>,
+    /// Metrics
+    metrics: Arc<Metrics>,
+    /// Owner Tag Value
+    owner_tag_value: String,
 }
+
+/// State wrapper around the controller outputs for the web server
 impl State {
-    fn new() -> Self {
-        State {
-            last_event: Utc::now(),
-            reporter: "secret-controller".into(),
-        }
+    /// Metrics getter
+    pub fn metrics(&self) -> String {
+        let mut buffer = String::new();
+        let registry = &*self.metrics.registry;
+        prometheus_client::encoding::text::encode(&mut buffer, registry).unwrap();
+        buffer
+    }
+
+    pub fn set_owner_tag_value(&mut self, tag: &str) {
+        self.owner_tag_value = tag.to_string();
+    }
+
+    /// State getter
+    pub async fn diagnostics(&self) -> Diagnostics {
+        self.diagnostics.read().await.clone()
+    }
+
+    // Create a Controller Context that can update State
+    pub async fn to_context(
+        &self,
+        client: Client,
+        aws_client: aws_sdk_acm::Client,
+    ) -> Arc<Context> {
+        Arc::new(Context {
+            client: client.clone(),
+            recorder: self.diagnostics.read().await.recorder(client),
+            metrics: self.metrics.clone(),
+            diagnostics: self.diagnostics.clone(),
+            owner_tag_value: self.owner_tag_value.clone(),
+            aws_client: aws_client.clone(),
+        })
     }
 }
 
@@ -312,24 +365,18 @@ impl Manager {
     ///
     /// This returns a `Manager` that drives a `Controller` + a future to be awaited
     /// It is up to `main` to wait for the controller stream.
-    pub async fn new(owner_tag_value: String) -> (Self, BoxFuture<'static, ()>) {
-        let shared_config = aws_config::load_from_env().await;
+    pub async fn run(state: State) {
+        let shared_config = aws_config::defaults(BehaviorVersion::v2024_03_28())
+            .load()
+            .await;
         let aws_client = aws_sdk_acm::Client::new(&shared_config);
         let client = Client::try_default().await.expect("create client");
-        let metrics = Metrics::new();
-        let state = Arc::new(RwLock::new(State::new()));
-        let context = Arc::new(Data {
-            client: client.clone(),
-            aws_client: aws_client.clone(),
-            metrics,
-            state: state.clone(),
-            owner_tag_value,
-        });
 
         let secrets = Api::<Secret>::all(client.clone());
         let ingresses = Api::<Ingress>::all(client.clone());
 
-        let controller = Controller::new(ingresses, ListParams::default());
+        let controller = Controller::new(ingresses, Config::default().any_semantic());
+
         let store = controller.store();
         let secret_mapper = {
             let client = client.clone();
@@ -337,37 +384,21 @@ impl Manager {
         };
 
         // All good. Start controller and return its future.
-        let drainer = controller
-            .watches(secrets, ListParams::default(), secret_mapper)
+        controller
+            .shutdown_on_signal()
+            .watches(secrets, Config::default(), secret_mapper)
             // .run(reconcile, error_policy, context)
             .run(
-                move |ing, ctx| {
-                    let ns = ing.meta().namespace.as_deref().unwrap();
-                    let ingresses = Api::<Ingress>::namespaced(client.clone(), ns);
-                    async move {
-                        finalizer(&ingresses, FINALIZER_NAME, ing, |event| async {
-                            match event {
-                                finalizer::Event::Apply(ing) => apply(ing, ctx).await,
-                                finalizer::Event::Cleanup(ing) => cleanup(ing, ctx).await,
-                            }
-                        })
-                        .await
-                    }
-                },
-                |_obj, err, _data| {
-                    warn!("reconcile failed: {:?}", err);
-                    Action::requeue(Duration::from_secs(120))
-                },
-                context,
+                reconcile,
+                error_policy,
+                state.to_context(client, aws_client).await,
             )
             .filter_map(|x| async move { std::result::Result::ok(x) })
             .for_each(|_| futures::future::ready(()))
-            .boxed();
-
-        (Self { state }, drainer)
+            .await;
     }
 
-    /// Metrics getter
+    // Metrics getter
     pub fn metrics(&self) -> Vec<MetricFamily> {
         default_registry().gather()
     }

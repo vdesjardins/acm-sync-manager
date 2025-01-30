@@ -1,8 +1,6 @@
 use acm_sync_manager::{acm, manager};
-use aws_sdk_acm::{
-    error::{self, GetCertificateErrorKind},
-    types,
-};
+use aws_config::BehaviorVersion;
+use aws_sdk_acm::error::SdkError;
 use std::{collections::HashMap, time::Duration};
 use tokio::time::Instant;
 
@@ -76,10 +74,12 @@ async fn test_certificate_import() -> anyhow::Result<()> {
     let arn = ing
         .annotations()
         .get_key_value(manager::ALB_ARN_ANNOTATION)
-        .map_or(None, |kv| Some(kv.1));
+        .map(|kv| kv.1);
     assert!(arn.is_some());
 
-    let shared_config = aws_config::load_from_env().await;
+    let shared_config = aws_config::defaults(BehaviorVersion::v2024_03_28())
+        .load()
+        .await;
     let aws_client = aws_sdk_acm::Client::new(&shared_config);
 
     // check in ACM if certificate exists and has the right tags
@@ -161,7 +161,7 @@ async fn wait_for_certificate_not_found(
     for _i in 0..10 {
         tokio::time::sleep_until(Instant::now() + Duration::from_millis(1000)).await;
         let result = check_certificate_not_found(client, arn).await;
-        if let Ok(_) = result {
+        if result.is_ok() {
             return Ok(());
         }
     }
@@ -175,16 +175,9 @@ async fn check_certificate_not_found(
 ) -> anyhow::Result<()> {
     let result = client.get_certificate().certificate_arn(arn).send().await;
     match result {
-        Err(types::SdkError::ServiceError {
-            err:
-                error::GetCertificateError {
-                    kind: GetCertificateErrorKind::ResourceNotFoundException(..),
-                    ..
-                },
-            ..
-        }) => return Ok(()),
-        Err(err) => return Err(err.into()),
-        Ok(_) => return Err(anyhow::anyhow!("still defined in ACM")),
+        Err(SdkError::ServiceError(err)) if err.err().is_resource_not_found_exception() => Ok(()),
+        Err(err) => Err(err.into()),
+        Ok(_) => Err(anyhow::anyhow!("still defined in ACM")),
     }
 }
 
@@ -197,9 +190,8 @@ async fn check_tags(client: &aws_sdk_acm::Client, arn: &str) -> anyhow::Result<(
 
     let tags: HashMap<_, _> = resp
         .tags()
-        .unwrap()
-        .into_iter()
-        .map(|t| (t.key().unwrap(), t.value().unwrap()))
+        .iter()
+        .map(|t| (t.key(), t.value().unwrap()))
         .collect();
     assert!(
         tags.contains_key(acm::TAG_OWNER)

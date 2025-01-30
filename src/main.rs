@@ -4,6 +4,10 @@ use std::{net::SocketAddr, sync::Arc};
 pub use acm_sync_manager::*;
 
 use acm_sync_manager::manager::State;
+pub use acm_sync_manager::telemetry;
+use actix_web::{
+    get, middleware, web::Data, App, HttpRequest, HttpResponse, HttpServer, Responder,
+};
 use axum::{
     extract::{self, Extension},
     http::StatusCode,
@@ -35,83 +39,52 @@ struct Args {
     owner_tag_value: String,
 }
 
-async fn metrics(state: Extension<Manager>) -> (StatusCode, String) {
-    let state_metrics = state.metrics();
-    let encoder = TextEncoder::new();
-    let mut buffer = vec![];
-    encoder.encode(&state_metrics, &mut buffer).unwrap();
-    (StatusCode::OK, String::from_utf8(buffer).unwrap())
+#[get("/metrics")]
+async fn metrics(c: Data<State>, _req: HttpRequest) -> impl Responder {
+    let metrics = c.metrics();
+    HttpResponse::Ok()
+        .content_type("application/openmetrics-text; version=1.0.0; charset=utf-8")
+        .body(metrics)
 }
 
-async fn health() -> (StatusCode, Json<&'static str>) {
-    (StatusCode::OK, Json("healthy"))
+#[get("/health")]
+async fn health(_: HttpRequest) -> impl Responder {
+    HttpResponse::Ok().json("healthy")
 }
 
-async fn index(state: Extension<Manager>) -> (StatusCode, Json<State>) {
-    (StatusCode::OK, Json(state.state().await))
+#[get("/")]
+async fn index(c: Data<State>, _req: HttpRequest) -> impl Responder {
+    let d = c.diagnostics().await;
+    HttpResponse::Ok().json(&d)
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Setup tracing layers
-    #[cfg(feature = "telemetry")]
-    let telemetry = tracing_opentelemetry::layer().with_tracer(telemetry::init_tracer().await);
-    let logger = tracing_subscriber::fmt::layer().json();
-    let env_filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
-        .unwrap();
+    telemetry::init().await;
 
-    // Decide on layers
-    #[cfg(feature = "telemetry")]
-    let collector = Registry::default()
-        .with(telemetry)
-        .with(logger)
-        .with(env_filter);
-    #[cfg(not(feature = "telemetry"))]
-    let collector = Registry::default().with(logger).with(env_filter);
-
-    // Initialize tracing
-    tracing::subscriber::set_global_default(collector).unwrap();
+    let mut state = State::default();
+    state.set_owner_tag_value(&args.owner_tag_value);
 
     // Start kubernetes controller
-    let (manager, drainer) = Manager::new(args.owner_tag_value).await;
+    let controller = Manager::run(state.clone());
 
     // Start web server
-    info!("starting metrics server on {}", args.metrics_bind_address);
-    let app_metrics = Router::new()
-        .route("/metrics", get(metrics))
-        .layer(extract::Extension(manager.clone()))
-        .layer(TraceLayer::new_for_http());
+    let server = HttpServer::new(move || {
+        App::new()
+            .app_data(Data::new(state.clone()))
+            .wrap(middleware::Logger::default().exclude("/health"))
+            .service(index)
+            .service(health)
+            .service(metrics)
+    })
+    // TODO: use arg ports for health and metrics
+    .bind("0.0.0.0:8080")?
+    .shutdown_timeout(5);
 
-    let mut shutdown = signal(SignalKind::terminate()).expect("could not monitor for SIGTERM");
-    let server_metrics = axum::Server::bind(&args.metrics_bind_address)
-        .serve(app_metrics.into_make_service())
-        .with_graceful_shutdown(async move {
-            shutdown.recv().await;
-        });
+    // Both runtimes implements graceful shutdown, so poll until both are done
+    tokio::join!(controller, server.run()).1?;
 
-    info!("starting server on {}", args.health_probe_bind_address);
-    let app = Router::new()
-        .route("/", get(index))
-        .layer(extract::Extension(manager.clone()))
-        .layer(TraceLayer::new_for_http())
-        // Reminder: routes added *after* TraceLayer are not subject to its logging behavior
-        .route("/healthz", get(health))
-        .route("/readyz", get(health));
-
-    let mut shutdown = signal(SignalKind::terminate()).expect("could not monitor for SIGTERM");
-    let server_controller = axum::Server::bind(&args.health_probe_bind_address)
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(async move {
-            shutdown.recv().await;
-        });
-
-    tokio::select! {
-        _ = drainer => warn!("controller drained"),
-        _ = server_metrics => info!("metrics exited"),
-        _ = server_controller => info!("controller exited"),
-    }
     Ok(())
 }

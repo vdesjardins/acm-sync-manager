@@ -49,5 +49,3 @@ To install acm-sync-manager using Helm:
 helm repo add acm-sync-manager https://vdesjardins.github.io/acm-sync-manager
 helm install acm-sync-manager/acm-sync-manager --generate-name
 ```
-
-
