@@ -14,7 +14,7 @@
     fenix,
   }: let
     localOverlay = import ./nix/overlay.nix;
-    overlays = [fenix.overlay localOverlay];
+    overlays = [fenix.overlays.default localOverlay];
   in
     flake-utils.lib.eachDefaultSystem
     (system: let
