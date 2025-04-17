@@ -366,7 +366,7 @@ impl Manager {
     /// This returns a `Manager` that drives a `Controller` + a future to be awaited
     /// It is up to `main` to wait for the controller stream.
     pub async fn run(state: State) {
-        let shared_config = aws_config::defaults(BehaviorVersion::v2024_03_28())
+        let shared_config = aws_config::defaults(BehaviorVersion::v2025_01_17())
             .load()
             .await;
         let aws_client = aws_sdk_acm::Client::new(&shared_config);
