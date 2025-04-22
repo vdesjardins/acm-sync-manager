@@ -42,10 +42,37 @@ An example of policy to use that will give required access to ACM:
 }
 ```
 
-# Installation
+## Installation
 To install acm-sync-manager using Helm:
 
 ```bash
 helm repo add acm-sync-manager https://vdesjardins.github.io/acm-sync-manager
 helm install acm-sync-manager/acm-sync-manager --generate-name
+```
+
+## Testing
+
+We need to export those variables and run the AWS setup:
+```sh
+export OIDC_S3_BUCKET_NAME=<your s3 bucket name>
+export AWS_REGION=ca-central-1
+make setup-aws
+```
+
+After we need to create our kind test cluster:
+
+```sh
+make cluster
+```
+
+Install the controller:
+
+```sh
+make install-local
+```
+
+Running tests:
+
+```sh
+make test
 ```
