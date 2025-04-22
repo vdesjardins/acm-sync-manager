@@ -56,8 +56,8 @@ anyhow = "1.0.95"
 prometheus-client = "0.23.1"
 
 [dependencies.kube]
-version = "0.99.0"
-features = ["runtime", "client", "derive", "rustls-tls"]
+features = ["runtime", "client", "derive", "rustls-tls", "aws-lc-rs"]
 
+version = "0.99.0"
 [dev-dependencies]
 anyhow = "1.0.95"
