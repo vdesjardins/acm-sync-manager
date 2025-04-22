@@ -1,4 +1,3 @@
-
 # Image URL to use all building/pushing image targets
 IMG ?= acm-sync-manager:latest
 
@@ -148,8 +147,8 @@ setup-eks-webhook:
 	curl $$APISERVER/.well-known/openid-configuration --header "Authorization: Bearer $$TOKEN" --insecure -o openid-configuration;
 	curl $$APISERVER/openid/v1/jwks --header "Authorization: Bearer $$TOKEN" --insecure -o jwks;
 	#Put idP configuration in public S3 bucket
-	aws s3 cp --acl public-read jwks s3://$$OIDC_S3_BUCKET_NAME/cluster/acm-sync-cluster/openid/v1/jwks;
-	aws s3 cp --acl public-read openid-configuration s3://$$OIDC_S3_BUCKET_NAME/cluster/acm-sync-cluster/.well-known/openid-configuration;
+	aws s3 cp jwks s3://$$OIDC_S3_BUCKET_NAME/cluster/acm-sync-cluster/openid/v1/jwks;
+	aws s3 cp openid-configuration s3://$$OIDC_S3_BUCKET_NAME/cluster/acm-sync-cluster/.well-known/openid-configuration;
 	sleep 60;
 	envsubst -no-empty -i e2e/kind_config/install_eks.yaml | kubectl apply -f - --kubeconfig=$(TEST_KUBECONFIG_LOCATION);
 	kubectl wait --for=condition=Available --timeout 300s deployment pod-identity-webhook --kubeconfig=$(TEST_KUBECONFIG_LOCATION);
