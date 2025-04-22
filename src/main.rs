@@ -27,11 +27,11 @@ use tracing_subscriber::{prelude::*, EnvFilter, Registry};
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// prometheus metric bind address
-    #[clap(long, default_value = "127.0.0.1:8081")]
+    #[clap(long, default_value = "127.0.0.1:8080")]
     metrics_bind_address: SocketAddr,
 
     /// health probe bind address
-    #[clap(long, default_value = "0.0.0.0:8080")]
+    #[clap(long, default_value = "0.0.0.0:8081")]
     health_probe_bind_address: SocketAddr,
 
     /// owner tag value set on ACM certificate
@@ -47,9 +47,14 @@ async fn metrics(c: Data<State>, _req: HttpRequest) -> impl Responder {
         .body(metrics)
 }
 
-#[get("/health")]
+#[get("/healthz")]
 async fn health(_: HttpRequest) -> impl Responder {
     HttpResponse::Ok().json("healthy")
+}
+
+#[get("/readyz")]
+async fn ready(_: HttpRequest) -> impl Responder {
+    HttpResponse::Ok().json("ready")
 }
 
 #[get("/")]
@@ -70,21 +75,32 @@ async fn main() -> anyhow::Result<()> {
     // Start kubernetes controller
     let controller = Manager::run(state.clone());
 
-    // Start web server
+    // Start health server
     let server = HttpServer::new(move || {
         App::new()
-            .app_data(Data::new(state.clone()))
-            .wrap(middleware::Logger::default().exclude("/health"))
+            .wrap(
+                middleware::Logger::default()
+                    .exclude("/healthz")
+                    .exclude("/readyz"),
+            )
             .service(index)
             .service(health)
+            .service(ready)
+    })
+    .bind(args.health_probe_bind_address)?
+    .shutdown_timeout(5);
+
+    // Start metrics web server
+    let metrics_server = HttpServer::new(move || {
+        App::new()
+            .app_data(Data::new(state.clone()))
             .service(metrics)
     })
-    // TODO: use arg ports for health and metrics
-    .bind("0.0.0.0:8080")?
+    .bind(args.metrics_bind_address)?
     .shutdown_timeout(5);
 
     // Both runtimes implements graceful shutdown, so poll until both are done
-    tokio::join!(controller, server.run()).1?;
+    tokio::join!(controller, server.run(), metrics_server.run()).1?;
 
     Ok(())
 }
