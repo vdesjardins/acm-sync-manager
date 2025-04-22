@@ -56,19 +56,13 @@ spec:
           env:
             - name: RUST_BACKTRACE
               value: "1"
-        - name: kube-rbac-proxy
-          image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
-          args:
-          - "--secure-listen-address=0.0.0.0:8443"
-          - "--upstream=http://127.0.0.1:8080/"
-          - "--logtostderr=true"
-          - "--v=10"
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
-          - containerPort: 8443
+          - containerPort: 8081
             protocol: TCP
-            name: https
+            name: http-health
+          - containerPort: 8080
+            protocol: TCP
+            name: http-metrics
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -81,4 +75,3 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-
