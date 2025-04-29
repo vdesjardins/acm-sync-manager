@@ -12,5 +12,5 @@ spec:
       scheme: http
   selector:
     matchLabels:
-      {{- include "acm-sync-manager.selectorLabels" . | nindent 4 }}
+      {{- include "acm-sync-manager.selectorLabels" . | nindent 6 }}
 {{- end }}
