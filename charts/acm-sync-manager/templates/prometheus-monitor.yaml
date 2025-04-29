@@ -1,18 +1,16 @@
-{{- if .Values.prometheus.enabled }}
-# Prometheus Monitor Service (Metrics)
+{{- if .Values.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    control-plane: controller-manager
-  name: controller-manager-metrics-monitor
-  namespace: system
+    {{- include "acm-sync-manager.labels" . | nindent 4 }}
+  name: {{ include "acm-sync-manager.fullname" . }}
 spec:
   endpoints:
     - path: /metrics
-      port: http
+      port: http-metrics
       scheme: http
   selector:
     matchLabels:
-      control-plane: controller-manager
+      {{- include "acm-sync-manager.selectorLabels" . | nindent 4 }}
 {{- end }}

@@ -7,24 +7,13 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: http
+    - name: http-health
+      port: {{ .Values.service.port }}
+      targetPort: http-health
       protocol: TCP
-      name: http
+    - name: http-metrics
+      port: {{ .Values.service.metrics.port }}
+      protocol: TCP
+      targetPort: http-metrics
   selector:
     {{- include "acm-sync-manager.selectorLabels" . | nindent 4 }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "acm-sync-manager.fullname" . }}-controller-manager-metrics-service
-  labels:
-    {{- include "acm-sync-manager.labels" . | nindent 4 }}
-spec:
-  ports:
-  - name: https
-    port: 80
-    protocol: TCP
-    targetPort: http-metrics
-  selector:
-    control-plane: controller-manager
