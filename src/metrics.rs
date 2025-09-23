@@ -116,6 +116,6 @@ impl Drop for ReconcileMeasurer {
         #[allow(clippy::cast_precision_loss)]
         let duration = self.start.elapsed().as_millis() as f64 / 1000.0;
         let labels = self.labels.take();
-        self.metric.observe(duration, labels);
+        self.metric.observe(duration, labels, None);
     }
 }

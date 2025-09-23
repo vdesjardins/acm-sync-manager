@@ -176,7 +176,7 @@ install-local: docker-build docker-push-local
 	kubectl get namespace $(NAMESPACE) --kubeconfig=$(TEST_KUBECONFIG_LOCATION) || \
 	kubectl create namespace $(NAMESPACE) --kubeconfig=$(TEST_KUBECONFIG_LOCATION)
 
-	helm install $(HELM_RELEASE_NAME) ./charts/$(CONTROLLER_NAME) -n $(NAMESPACE) \
+	helm upgrade --install $(HELM_RELEASE_NAME) ./charts/$(CONTROLLER_NAME) -n $(NAMESPACE) \
 	--set serviceAccount.name=$(SERVICE_ACCOUNT) \
 	--set image.repository=$(LOCAL_IMAGE) \
 	--set image.tag=latest --set image.pullPolicy=Always \
