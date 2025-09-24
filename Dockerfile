@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ------------------------------------------------------------------------------
 # Final Stage
 # ------------------------------------------------------------------------------
-FROM debian:bookworm-20250908
+FROM debian:stable-slim
 
 WORKDIR /
 
