@@ -77,7 +77,7 @@ async fn test_certificate_import() -> anyhow::Result<()> {
         .map(|kv| kv.1);
     assert!(arn.is_some());
 
-    let shared_config = aws_config::defaults(BehaviorVersion::v2025_01_17())
+    let shared_config = aws_config::defaults(BehaviorVersion::v2026_01_12())
         .load()
         .await;
     let aws_client = aws_sdk_acm::Client::new(&shared_config);
