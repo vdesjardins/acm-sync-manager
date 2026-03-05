@@ -2,7 +2,7 @@
   description = "acm-sync-manager project";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/release-25.05";
+    nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
     fenix.url = "github:/nix-community/fenix";
     flake-utils.url = "github:numtide/flake-utils";
   };

@@ -27,36 +27,36 @@ tokio = { version = "1.48.0", features = [
     "signal",
 ] }
 tokio-rustls = "0.26.4"
-k8s-openapi = { version = "0.26.0", features = [
+k8s-openapi = { version = "0.27.0", features = [
     "v1_32",
 ], default-features = false }
-actix-web = "4.12.0"
+actix-web = "4.13.0"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-chrono = { version = "0.4.42", features = ["serde"] }
-thiserror = "2.0.17"
-schemars = { version = "1.1.0", features = ["chrono04"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["json", "env-filter"] }
-tracing-opentelemetry = "0.32.0"
+serde_json = "1.0.149"
+chrono = { version = "0.4.44", features = ["serde"] }
+thiserror = "2.0.18"
+schemars = { version = "1.2.1", features = ["chrono04"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["json", "env-filter"] }
+tracing-opentelemetry = "0.32.1"
 opentelemetry = { version = "0.31.0", features = ["trace"] }
 opentelemetry-otlp = { version = "0.31.0", features = [
     "tokio",
 ], optional = true }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 prometheus = "0.14.0"
-tonic = { version = "0.14.2", features = ["transport"], optional = true }
-aws-config = "1.8.11"
-aws-sdk-acm = "1.93.0"
-axum = { version = "0.8.7" }
-tower-http = "0.6.7"
-clap = { version = "4.5.53", features = ["derive"] }
-anyhow = "1.0.100"
+tonic = { version = "0.14.5", features = ["transport"], optional = true }
+aws-config = "1.8.15"
+aws-sdk-acm = "1.99.0"
+axum = { version = "0.8.8" }
+tower-http = "0.6.8"
+clap = { version = "4.5.60", features = ["derive"] }
+anyhow = "1.0.102"
 prometheus-client = "0.24.0"
 
 [dependencies.kube]
 features = ["runtime", "client", "derive", "rustls-tls", "aws-lc-rs"]
+version = "3.0.1"
 
-version = "2.0.1"
 [dev-dependencies]
 anyhow = "1.0.100"

@@ -69,7 +69,7 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 CONTROLLER_NAME := acm-sync-manager
 K8S_CLUSTER_NAME := $(CONTROLLER_NAME)
-CERT_MANAGER_VERSION ?= 1.6.1
+CERT_MANAGER_VERSION ?= 1.19.4
 HELM_RELEASE_NAME := $(CONTROLLER_NAME)
 
 REGISTRY_NAME := "kind-registry"
