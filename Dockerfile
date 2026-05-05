@@ -10,8 +10,8 @@ WORKDIR /usr/src/acm-sync-manager
 
 # Install cross-compilation dependencies
 RUN case "$TARGETPLATFORM" in \
-    "linux/amd64") echo "x86_64-unknown-linux-gnu" > /rust_target.txt ;; \
-    "linux/arm64") echo "aarch64-unknown-linux-gnu" > /rust_target.txt && \
+    linux/amd64*) echo "x86_64-unknown-linux-gnu" > /rust_target.txt ;; \
+    linux/arm64*) echo "aarch64-unknown-linux-gnu" > /rust_target.txt && \
         apt-get update && \
         apt-get install -y gcc-aarch64-linux-gnu && \
         rustup target add aarch64-unknown-linux-gnu ;; \

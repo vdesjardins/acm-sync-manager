@@ -47,60 +47,124 @@ metadata:
   name: version
   namespace: default
   labels:
-    app: version
+    app.kubernetes.io/name: podinfo
 spec:
   ports:
   - port: 80
-    targetPort: 8000
+    targetPort: 9898
     protocol: TCP
     name: http
   selector:
-    app: version
-
+    app.kubernetes.io/name: podinfo
 ---
 # Main deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: version
-  namespace: default
   labels:
-    app: version
+    app.kubernetes.io/name: podinfo
+    app.kubernetes.io/version: 6.5.4
+  name: podinfo
+  namespace: default
 spec:
+  progressDeadlineSeconds: 600
   replicas: 1
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
-      app: version
+      app.kubernetes.io/name: podinfo
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 1
+    type: RollingUpdate
   template:
     metadata:
-      labels:
-        app: version
       annotations:
+        prometheus.io/port: "9898"
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8000"
+      labels:
+        app.kubernetes.io/name: podinfo
     spec:
-      serviceAccountName: version
       containers:
-      - name: version
-        image: "clux/version:latest"
-        imagePullPolicy: Always
-        resources:
-          limits:
-            cpu: 100m
-            memory: 128Mi
-          requests:
-            cpu: 50m
-            memory: 100Mi
-        ports:
-        - name: http
-          containerPort: 8000
-          protocol: TCP
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: http
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        env:
-        - name: NAMESPACE
-          value: "default"
+        - command:
+            - ./podinfo
+            - --port=9898
+            - --cert-path=/data/cert
+            - --port-metrics=9797
+            - --grpc-port=9999
+            - --grpc-service-name=podinfo
+            - --level=info
+            - --random-delay=false
+            - --random-error=false
+          env:
+            - name: PODINFO_UI_COLOR
+              value: '#34577c'
+          image: stefanprodan/podinfo:6.9.3
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            exec:
+              command:
+                - podcli
+                - check
+                - http
+                - localhost:9898/healthz
+            failureThreshold: 3
+            initialDelaySeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          name: podinfo
+          ports:
+            - containerPort: 9898
+              name: http
+              protocol: TCP
+            - containerPort: 9797
+              name: http-metrics
+              protocol: TCP
+            - containerPort: 9999
+              name: grpc
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+                - podcli
+                - check
+                - http
+                - localhost:9898/readyz
+            failureThreshold: 3
+            initialDelaySeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 1m
+              memory: 16Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /data
+              name: data
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        supplementalGroups:
+          - 65534
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - emptyDir: {}
+          name: data

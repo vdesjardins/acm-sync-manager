@@ -2,6 +2,9 @@
 IMG ?= acm-sync-manager:latest
 
 KUSTOMIZE = kustomize
+CONTAINER_ENGINE ?= docker
+# Extra flags for pushing to the local registry (e.g. --tls-verify=false for podman)
+LOCAL_REGISTRY_PUSH_FLAGS ?=
 
 SHELL = bash
 .SHELLFLAGS = -ec -o pipefail
@@ -36,11 +39,11 @@ run: ## Run a controller from your host.
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	docker build -t $(IMG) .
+	$(CONTAINER_ENGINE) build -t $(IMG) .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push $(IMG)
+	$(CONTAINER_ENGINE) push $(IMG)
 
 ##@ Deployment
 
@@ -103,15 +106,15 @@ cleanup-aws: ## cleanup AWS for IRSA
 	./e2e/aws_config/cleanup.sh $$OIDC_S3_BUCKET_NAME
 
 create-local-registry:
-	RUNNING=$$(docker inspect -f '{{.State.Running}}' $(REGISTRY_NAME) 2>/dev/null || true); \
+	RUNNING=$$($(CONTAINER_ENGINE) inspect -f '{{.State.Running}}' $(REGISTRY_NAME) 2>/dev/null || true); \
 	if [ "$$RUNNING" != 'true' ]; then \
-		docker run -d --restart=always -p "127.0.0.1:$(REGISTRY_PORT):5000" --name $(REGISTRY_NAME) registry:2; \
+		$(CONTAINER_ENGINE) run -d --restart=always -p "127.0.0.1:$(REGISTRY_PORT):5000" --name $(REGISTRY_NAME) registry:2; \
 	fi; \
 	sleep 15
 
 docker-push-local:
-	docker tag $(IMG) $(LOCAL_IMAGE)
-	docker push $(LOCAL_IMAGE)
+	$(CONTAINER_ENGINE) tag $(IMG) $(LOCAL_IMAGE)
+	$(CONTAINER_ENGINE) push $(LOCAL_REGISTRY_PUSH_FLAGS) $(LOCAL_IMAGE)
 
 .PHONY: kind-cluster
 kind-cluster: ## Use Kind to create a Kubernetes cluster for E2E tests
@@ -129,7 +132,7 @@ kind-cluster: ## Use Kind to create a Kubernetes cluster for E2E tests
 	kind get clusters | grep $(K8S_CLUSTER_NAME) || \
 	kind create cluster --name $(K8S_CLUSTER_NAME) --config=/tmp/config.yaml
 	kind get kubeconfig --name $(K8S_CLUSTER_NAME) > $(TEST_KUBECONFIG_LOCATION)
-	docker network connect "kind" $(REGISTRY_NAME) || true
+	$(CONTAINER_ENGINE) network connect "kind" $(REGISTRY_NAME) || true
 	kubectl apply -f e2e/kind_config/registry_configmap.yaml --kubeconfig=$(TEST_KUBECONFIG_LOCATION)
 
 .PHONY: setup-eks-webhook
