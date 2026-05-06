@@ -40,8 +40,5 @@ mkShell {
       gnumake
       jq
       envsubst
-    ]
-    ++ lib.optionals stdenv.isDarwin [
-      darwin.apple_sdk.frameworks.Security
     ];
 }
