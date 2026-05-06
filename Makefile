@@ -132,6 +132,13 @@ kind-cluster: ## Use Kind to create a Kubernetes cluster for E2E tests
 	kind get clusters | grep $(K8S_CLUSTER_NAME) || \
 	kind create cluster --name $(K8S_CLUSTER_NAME) --config=/tmp/config.yaml
 	kind get kubeconfig --name $(K8S_CLUSTER_NAME) > $(TEST_KUBECONFIG_LOCATION)
+	REGISTRY_DIR="/etc/containerd/certs.d/localhost:$(REGISTRY_PORT)"; \
+	echo "Adding local registry config to cluster nodes"; \
+	for node in $$(kind get nodes --name $(K8S_CLUSTER_NAME)); do \
+		echo "Configuring kubernetes node named $$node with local container registry"; \
+	    $(CONTAINER_ENGINE) exec "$${node}" mkdir -p "$${REGISTRY_DIR}"; \
+		printf '[host."http://'"$(REGISTRY_NAME)"':5000"]\n' | $(CONTAINER_ENGINE) exec -i "$${node}" cp /dev/stdin "$${REGISTRY_DIR}/hosts.toml"; \
+	done
 	$(CONTAINER_ENGINE) network connect "kind" $(REGISTRY_NAME) || true
 	kubectl apply -f e2e/kind_config/registry_configmap.yaml --kubeconfig=$(TEST_KUBECONFIG_LOCATION)
 
